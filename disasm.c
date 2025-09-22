@@ -39,11 +39,6 @@ const char* opcode_mnemonic(u8 op){
     const char* s = T[op];
     return s ? s : "OP?";
 }
-static inline uint8_t vmxcode_from_byte(uint8_t b){
-    uint8_t hi = (uint8_t)(b >> 4);
-    uint8_t lo = (uint8_t)(b & 0x0F);
-    return (hi != 0) ? hi : lo;
-}
 
 static inline const char* vmx_regname(uint8_t code){
     switch (code){
@@ -74,8 +69,8 @@ void format_operand(const DecodedOp* op, char* out, size_t cap){
 
   switch (op->type) {
     case OT_REG: {
-      uint8_t code = vmxcode_from_byte(op->raw[0]);
-      snprintf(out, cap, "%s", vmx_regname(code));  
+      uint8_t code = (uint8_t)(op->raw[0] & 0x0F);
+      snprintf(out, cap, "%s", vmx_regname(code)); 
       return;
     }
     case OT_IMM: {
@@ -84,16 +79,25 @@ void format_operand(const DecodedOp* op, char* out, size_t cap){
       return;
     }
     case OT_MEM: {
-        uint8_t  code = vmxcode_from_byte(op->raw[0]);
-        int16_t  disp = be16s(op->raw[1], op->raw[2]);   
-        const char* rb = vmx_regname(code);
+      uint8_t  b    = op->raw[0];
+      int16_t  disp = be16s(op->raw[1], op->raw[2]);
+
+      if (b == 0x0F || b == 0xF0){
+        const char* rb = "DS";
         if (disp == 0)           snprintf(out, cap, "[%s]", rb);
         else if (disp < 0)       snprintf(out, cap, "[%s-%d]", rb, -(int)disp);
         else                     snprintf(out, cap, "[%s+%d]", rb,  (int)disp);
         return;
-    }
-    default: out[0]=0; return;
-  }
+      }
+
+      uint8_t  code = (uint8_t)(b & 0x0F);
+      const char* rb = vmx_regname(code);
+      if (disp == 0)           snprintf(out, cap, "[%s]", rb);
+      else if (disp < 0)       snprintf(out, cap, "[%s-%d]", rb, -(int)disp);
+      else                     snprintf(out, cap, "[%s+%d]", rb,  (int)disp);
+       }
+      default: out[0]=0; return;
+     }
 }
 
 void disasm_print(VM* vm, const DecodedInst* di){

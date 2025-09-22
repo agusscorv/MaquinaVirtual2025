@@ -20,11 +20,6 @@ static inline void jump_to_code(VM* vm, uint16_t off){
   uint16_t code_seg = hi16_u32(vm->reg[CS]);               
   vm->reg[IP] = ((uint32_t)code_seg << 16) | (uint32_t)off; 
 }
-static inline uint8_t vmxcode_from_byte(uint8_t b){
-    uint8_t hi = (uint8_t)(b >> 4);
-    uint8_t lo = (uint8_t)(b & 0x0F);
-    return (hi != 0) ? hi : lo;
-}
 
 static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
     switch (code){
@@ -48,31 +43,22 @@ static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
 static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg_idx, u16* offset){
     if (op->type != OT_MEM) return false;
 
-  
     int16_t disp = be16s(op->raw[1], op->raw[2]);  
-
-
     uint8_t b = op->raw[0];
 
-
-    if (b == 0xF0 || b == 0x0F){
-        uint32_t base_ptr = vm->reg[DS];
+    if (b == 0x0F || b == 0xF0) {
+        u32 base_ptr = vm->reg[DS];
         *seg_idx = hi16_u32(base_ptr);
         *offset  = (u16)(lo16_u32(base_ptr) + disp);
         return true;
     }
 
 
-    uint8_t hi   = (uint8_t)(b >> 4);
-    uint8_t lo   = (uint8_t)(b & 0x0F);
-    uint8_t code = (hi != 0) ? hi : lo;
-
-
-    uint8_t r = vm_regidx_from_vmxcode(code);
+    uint8_t code = (uint8_t)(b & 0x0F);
+    uint8_t r    = vm_regidx_from_vmxcode(code);
     if (r >= REG_COUNT) return false;
 
-
-    uint32_t base_ptr = vm->reg[r];
+    u32 base_ptr = vm->reg[r];
     *seg_idx = hi16_u32(base_ptr);
     *offset  = (u16)(lo16_u32(base_ptr) + disp);
     return true;
@@ -83,7 +69,7 @@ bool read_operand_u32(VM* vm, const DecodedOp* op, uint32_t* out){
         case OT_NONE:
             *out = 0; return true;
         case OT_REG: {
-            uint8_t code = vmxcode_from_byte(op->raw[0]);
+            uint8_t code = (uint8_t)(op->raw[0] & 0x0F);
             uint8_t r    = vm_regidx_from_vmxcode(code);
             if (r >= REG_COUNT) return false;
             *out = vm->reg[r];
@@ -105,7 +91,7 @@ bool read_operand_u32(VM* vm, const DecodedOp* op, uint32_t* out){
 bool write_operand_u32(VM* vm, const DecodedOp* op, uint32_t val){
     switch(op->type){
         case OT_REG: {
-            uint8_t code = vmxcode_from_byte(op->raw[0]);
+            uint8_t code = (uint8_t)(op->raw[0] & 0x0F);
             uint8_t r    = vm_regidx_from_vmxcode(code);
             if (r >= REG_COUNT) return false;
             vm->reg[r] = val;
