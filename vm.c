@@ -14,8 +14,7 @@ static inline u16 read_u16_be(const u8 b[2]){
 void vm_init(VM* vm, bool disassemble) {
   memset(vm, 0, sizeof(*vm));
   vm->disassemble = disassemble;
-  // Aún no seteamos CS/DS/IP ni la tabla de segmentos.
-  // Eso se hará en el paso de carga del .vmx (vm_load).
+
 }
 
 bool vm_load(VM* vm, const char* path) {

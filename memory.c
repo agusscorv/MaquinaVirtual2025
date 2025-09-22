@@ -60,7 +60,7 @@ bool mem_read_u8(VM* vm, u16 seg_idx, u16 offset, u32* out_value){
 bool mem_read_u16(VM* vm, uint16_t s, uint16_t o, uint32_t* out){
     uint8_t b[2];
     if(!read_bytes(vm,s,o,b,2)) return false;
-    *out = ((uint32_t)b[0] << 8) | (uint32_t)b[1]; // big-endian
+    *out = ((uint32_t)b[0] << 8) | (uint32_t)b[1]; 
     return true;
 }
 bool mem_read_u32(VM* vm, uint16_t s, uint16_t o, uint32_t* out){

@@ -45,7 +45,6 @@ static inline uint8_t vmxcode_from_byte(uint8_t b){
     return (hi != 0) ? hi : lo;
 }
 
-// Devuelve el nombre textual segun el código que emite el .vmx
 static inline const char* vmx_regname(uint8_t code){
     switch (code){
         case  1: return "DS";
@@ -76,17 +75,17 @@ void format_operand(const DecodedOp* op, char* out, size_t cap){
   switch (op->type) {
     case OT_REG: {
       uint8_t code = vmxcode_from_byte(op->raw[0]);
-      snprintf(out, cap, "%s", vmx_regname(code));  // ya imprime EAX, ECX, EDX, DS, etc.
+      snprintf(out, cap, "%s", vmx_regname(code));  
       return;
     }
     case OT_IMM: {
-      uint16_t v = be16(op->raw[0], op->raw[1]);  // imprimir en DECIMAL
+      uint16_t v = be16(op->raw[0], op->raw[1]);  
       snprintf(out, cap, "%u", (unsigned)v);
       return;
     }
     case OT_MEM: {
         uint8_t  code = vmxcode_from_byte(op->raw[0]);
-        int16_t  disp = be16s(op->raw[1], op->raw[2]);   // tu helper con signo
+        int16_t  disp = be16s(op->raw[1], op->raw[2]);   
         const char* rb = vmx_regname(code);
         if (disp == 0)           snprintf(out, cap, "[%s]", rb);
         else if (disp < 0)       snprintf(out, cap, "[%s-%d]", rb, -(int)disp);

@@ -26,8 +26,6 @@ static inline uint8_t vmxcode_from_byte(uint8_t b){
     return (hi != 0) ? hi : lo;
 }
 
-// Mapa del código del .vmx -> índice de TU enum interno (vm.h)
-// Ajustá si tus índices difieren, pero estos suelen ser los habituales.
 static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
     switch (code){
         case  1: return DS;
@@ -44,19 +42,19 @@ static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
         case  6: return OP2;
         case  7: return AC;
         case  8: return CC;
-        default: return code; // fallback sensato
+        default: return code; 
     }
 }
 static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg_idx, u16* offset){
     if (op->type != OT_MEM) return false;
 
-    // 1) desplazamiento con signo (16 bits, big-endian)
-    int16_t disp = be16s(op->raw[1], op->raw[2]);   // asegúrate de tener be16s()
+  
+    int16_t disp = be16s(op->raw[1], op->raw[2]);  
 
-    // 2) byte crudo del operando MEM: [reg_byte][disp_hi][disp_lo]
+
     uint8_t b = op->raw[0];
 
-    // 3) DS implícito (sin base): el ensamblador suele codificar 0xF0 ó 0x0F
+
     if (b == 0xF0 || b == 0x0F){
         uint32_t base_ptr = vm->reg[DS];
         *seg_idx = hi16_u32(base_ptr);
@@ -64,17 +62,16 @@ static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg_idx, u16* offs
         return true;
     }
 
-    // 4) extraer "código de registro" del .vmx (alto si !=0; si no, el bajo)
+
     uint8_t hi   = (uint8_t)(b >> 4);
     uint8_t lo   = (uint8_t)(b & 0x0F);
     uint8_t code = (hi != 0) ? hi : lo;
 
-    // 5) mapear código del .vmx -> índice de TU enum interno
-    //    (usa la misma lógica que pusiste para REG en read/write)
+
     uint8_t r = vm_regidx_from_vmxcode(code);
     if (r >= REG_COUNT) return false;
 
-    // 6) formar seg:off finales
+
     uint32_t base_ptr = vm->reg[r];
     *seg_idx = hi16_u32(base_ptr);
     *offset  = (u16)(lo16_u32(base_ptr) + disp);
@@ -382,19 +379,19 @@ static int op_rnd(VM* vm, const DecodedInst* di){
 }
 
 static bool read_line(char* buf, size_t cap){
-    if (!fgets(buf, (int)cap, stdin))  // <- si NO leyó, fallo/EOF
+    if (!fgets(buf, (int)cap, stdin))  
         return false;
 
     size_t n = strlen(buf);
     while (n && (buf[n-1]=='\n' || buf[n-1]=='\r')) {
         buf[--n] = 0;
     }
-    return true;                       // <- éxito
+    return true;                     
 }
 
 static bool parse_input(u32 mode, u16 cell_size, u32* out){
     char buf[256];
-    if (!read_line(buf, sizeof buf))   // <- ahora read_line devuelve true en éxito
+    if (!read_line(buf, sizeof buf))   
         return false;
 
     if (mode & MODE_CHR){
@@ -415,7 +412,8 @@ static bool parse_input(u32 mode, u16 cell_size, u32* out){
     char* p = buf;
     if (p[0]=='0' && (p[1]=='x'||p[1]=='X')) { p += 2; base = 16; }
     else if (p[0]=='0' && (p[1]=='b'||p[1]=='B')) { p += 2; base = 2; }
-    else if ((mode & MODE_OCT) && p[0]=='0') { /* opcional: octal prefijo 0 */ }
+    else if ((mode & MODE_OCT) && p[0]=='0') {
+    }
 
     unsigned long ul = strtoul(p, NULL, base);
     *out = (u32)ul;
@@ -429,7 +427,7 @@ static void print_binary(u32 v){
     int started = 0;
     for (int i = 31; i >= 0; --i){
         int bit = (v >> i) & 1;
-        if (!started && bit == 0) continue;  // <- saltar ceros a la izquierda
+        if (!started && bit == 0) continue;  
         started = 1;
         putchar(bit ? '1' : '0');
     }
@@ -455,18 +453,18 @@ static int op_sys(VM* vm, const DecodedInst* di){
     uint32_t callno;
     if (!read_operand_u32(vm, &di->A, &callno)) return -1;
 
-    uint32_t eax = vm->reg[EAX];                // modos
-    uint32_t ecx = vm->reg[ECX];                // {size<<16 | count}
-    uint32_t edx = vm->reg[EDX];                // puntero base lógico (seg:off)
+    uint32_t eax = vm->reg[EAX];                
+    uint32_t ecx = vm->reg[ECX];               
+    uint32_t edx = vm->reg[EDX];               
 
-    uint16_t count = ecx_count(ecx);            // <- bajos
-    uint16_t size  = ecx_size(ecx);             // <- altos
+    uint16_t count = ecx_count(ecx);            
+    uint16_t size  = ecx_size(ecx);            
 
     if (!(size==1 || size==2 || size==4)) return -1;
-    if (callno == 1u){                          // READ
+    if (callno == 1u){                          
         uint32_t modes = eax & 0x1Fu;
 
-        for (uint16_t i=0; i<count; ++i){       // <- i < count  (no uses size aquí)
+        for (uint16_t i=0; i<count; ++i){       
             uint16_t phys;
             if (!phys_of_cell(vm, edx, size, i, &phys)) return -1;
 
@@ -480,7 +478,7 @@ static int op_sys(VM* vm, const DecodedInst* di){
             if (!mem_write_cell(vm, seg, off, size, val)) return -1;
         }
         return 0;
-    } else if (callno == 2u){                   // WRITE
+    } else if (callno == 2u){               
         uint32_t modes = eax & 0x1Fu;
 
         for (uint16_t i=0; i<count; ++i){
@@ -498,7 +496,7 @@ static int op_sys(VM* vm, const DecodedInst* di){
         }
         return 0;
     }
-    return -1;  // syscall desconocida
+    return -1;  
 }
 
 
@@ -515,7 +513,7 @@ void init_dispatch_table(OpHandler tb[256]){
     tb[0x05] = op_jnz;  // JNZ
     tb[0x06] = op_jnp;  // JNP (<=0)
     tb[0x07] = op_jnn;  // JNN (>=0)
-    tb[0x08] = op_not;  // NOT (un operando)
+    tb[0x08] = op_not;  // NOT 
     tb[0x0F]=op_stop;   // STOP
 
     tb[0x10] = op_mov;  // MOV 
