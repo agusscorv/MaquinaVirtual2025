@@ -42,6 +42,7 @@ static bool write_bytes(VM* vm, u16 seg_idx, u16 offset, const void* src, u16 nb
     if(!translate_and_check(vm, seg_idx, offset, nbytes, &phys)){
         return false;
     }
+    set_lar_mar(vm, seg_idx, offset, nbytes, phys);
     u32 mbr=0;
     memcpy(&mbr, src, nbytes);
     vm->reg[MBR]=mbr;

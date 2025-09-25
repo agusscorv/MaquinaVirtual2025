@@ -16,6 +16,7 @@ static inline uint32_t cc_Zbit(VM* vm){ return (vm->reg[CC] >> 30) & 1u; }
 static inline uint16_t ecx_count(uint32_t ecx){ return (uint16_t)(ecx & 0xFFFFu); }
 static inline uint16_t ecx_size (uint32_t ecx){ return (uint16_t)(ecx >> 16); }  
 enum { MODE_DEC=0x01, MODE_CHR=0x02, MODE_OCT=0x04, MODE_HEX=0x08, MODE_BIN=0x10 };
+
 static inline void jump_to_code(VM* vm, uint16_t off){
   uint16_t code_seg = hi16_u32(vm->reg[CS]);               
   vm->reg[IP] = ((uint32_t)code_seg << 16) | (uint32_t)off; 
@@ -23,44 +24,38 @@ static inline void jump_to_code(VM* vm, uint16_t off){
 
 static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
     switch (code){
-        case  1: return DS;
-        case 10: return EAX;
-        case 11: return EBX;
-        case 12: return ECX;
-        case 13: return EDX;
-        case 14: return CS;
-        case  0: return LAR;
-        case  2: return MBR;
-        case  3: return IP;
-        case  4: return OPC;
-        case  5: return OP1;
-        case  6: return OP2;
-        case  7: return AC;
-        case  8: return CC;
-        default: return code; 
+        case 0x00: return LAR;
+        case 0x01: return MAR;
+        case 0x02: return MBR;
+        case 0x03: return IP;
+        case 0x04: return OPC;
+        case 0x05: return OP1;
+        case 0x06: return OP2;
+        case 0x0A: return EAX;
+        case 0x0B: return EBX;
+        case 0x0C: return ECX;
+        case 0x0D: return EDX;
+        case 0x0E: return EEX;
+        case 0x0F: return EFX;
+        case 0x10: return AC;
+        case 0x11: return CC;
+        case 0x1A: return CS;
+        case 0x1B: return DS;
+        default:   return REG_COUNT; // inválido
     }
 }
-static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg_idx, u16* offset){
-    if (op->type != OT_MEM) return false;
+static inline bool is_ds_implicit(uint8_t b){ return b==0x0F || b==0xF0; } // si tu vmt usa esto
 
-    int16_t disp = be16s(op->raw[1], op->raw[2]);  
-    uint8_t b = op->raw[0];
-
-    if (b == 0x0F || b == 0xF0) {
-        u32 base_ptr = vm->reg[DS];
-        *seg_idx = hi16_u32(base_ptr);
-        *offset  = (u16)(lo16_u32(base_ptr) + disp);
-        return true;
-    }
-
-
-    uint8_t code = (uint8_t)(b & 0x0F);
-    uint8_t r    = vm_regidx_from_vmxcode(code);
-    if (r >= REG_COUNT) return false;
-
-    u32 base_ptr = vm->reg[r];
-    *seg_idx = hi16_u32(base_ptr);
-    *offset  = (u16)(lo16_u32(base_ptr) + disp);
+static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg, u16* off){
+    if(op->type != OT_MEM) return false;
+    uint8_t base_byte = op->raw[0];
+    int16_t disp = (int16_t)((op->raw[1]<<8) | op->raw[2]);  // BE con signo
+    uint8_t r = is_ds_implicit(base_byte) ? DS
+                                          : vm_regidx_from_vmxcode(base_byte & 0x1F);
+    if (r == REG_COUNT) return false;
+    u32 ptr = vm->reg[r];                 // seg:off empaquetado en 32 bits
+    *seg = (u16)(ptr >> 16);
+    *off = (u16)((ptr & 0xFFFFu) + (u16)disp);
     return true;
 }
 
@@ -69,10 +64,9 @@ bool read_operand_u32(VM* vm, const DecodedOp* op, uint32_t* out){
         case OT_NONE:
             *out = 0; return true;
         case OT_REG: {
-            uint8_t code = (uint8_t)(op->raw[0] & 0x0F);
-            uint8_t r    = vm_regidx_from_vmxcode(code);
-            if (r >= REG_COUNT) return false;
-            *out = vm->reg[r];
+            uint8_t r = vm_regidx_from_vmxcode(op->raw[0]); 
+            if (r == REG_COUNT) return false;
+            *out = vm->reg[r];  
             return true;
         }
         case OT_IMM: {
@@ -91,10 +85,9 @@ bool read_operand_u32(VM* vm, const DecodedOp* op, uint32_t* out){
 bool write_operand_u32(VM* vm, const DecodedOp* op, uint32_t val){
     switch(op->type){
         case OT_REG: {
-            uint8_t code = (uint8_t)(op->raw[0] & 0x0F);
-            uint8_t r    = vm_regidx_from_vmxcode(code);
-            if (r >= REG_COUNT) return false;
-            vm->reg[r] = val;
+           uint8_t r = vm_regidx_from_vmxcode(op->raw[0]);
+            if (r == REG_COUNT) return false;
+            vm->reg[r] = val;                          // ← 32 bits
             return true;
         }
         case OT_MEM: {
@@ -288,56 +281,56 @@ static bool read_jump_offset(VM* vm, const DecodedInst* di, int16_t* off){
     return true;
 }
 static int op_jmp(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
-    jump_to_code(vm, off);
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
+    jump_to_code(vm, (uint16_t)off);
     return 0;
 }
 static int op_jz(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
     if(cc_Zbit(vm)){
-        jump_to_code(vm, off);
+        jump_to_code(vm, (uint16_t)off);
     }
     return 0;
 }
 static int op_jnz(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
     if(!cc_Zbit(vm)){
-        jump_to_code(vm, off);
+        jump_to_code(vm, (uint16_t)off);
     }
     return 0;
 }
 static int op_jn(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
     if(cc_Nbit(vm)){
-        jump_to_code(vm, off);
+        jump_to_code(vm, (uint16_t)off);
     }
     return 0;
 }
 static int op_jnn(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
     if(!cc_Nbit(vm)){
-        jump_to_code(vm, off);
+        jump_to_code(vm, (uint16_t)off);
     }
     return 0;
 }
 static int op_jp(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
     if(!cc_Nbit(vm) && !cc_Zbit(vm)){
-        jump_to_code(vm, off);
+        jump_to_code(vm, (uint16_t)off);
     }
     return 0;
 }
 static int op_jnp(VM* vm, const DecodedInst* di){
-    u16 off;
-    if(!read_jump_offset(vm, di, (int16_t*)&off)) return -1;
+    int16_t off;
+    if(!read_jump_offset(vm, di, &off)) return -1;
     if (cc_Nbit(vm) || cc_Zbit(vm)){
-        jump_to_code(vm, off);
+        jump_to_code(vm, (uint16_t)off);
     }
     return 0;
 }
@@ -418,22 +411,68 @@ static void print_binary(u32 v){
         putchar(bit ? '1' : '0');
     }
 }
+// --- helpers de impresión para SYS 2 ---
+static inline uint32_t mask_by_size(uint32_t v, uint16_t sz){
+    switch (sz){
+        case 1: return v & 0xFFu;
+        case 2: return v & 0xFFFFu;
+        case 4: default: return v;
+    }
+}
 
+static void print_hex_padded(uint32_t v, uint16_t cell_size){
+    switch (cell_size){
+        case 1: printf("0x%02X",  (unsigned)(v & 0xFFu));    break;
+        case 2: printf("0x%04X",  (unsigned)(v & 0xFFFFu));  break;
+        case 4: printf("0x%08X",  (unsigned)v);              break;
+        default: printf("0x%X",   (unsigned)v);              break;
+    }
+}
+
+static void print_dec_signed(uint32_t v, uint16_t cell_size){
+    switch (cell_size){
+        case 1:  printf("%d",  (int8_t) (v & 0xFFu));    break;
+        case 2:  printf("%d", (int16_t)(v & 0xFFFFu));   break;
+        case 4:  printf("%d", (int32_t) v);              break;
+        default: printf("%u",  v);                       break;
+    }
+}
 static void print_chars(u32 v, u16 size){
     for(int i=size-1; i>=0; --i){
         unsigned char ch = (unsigned char)((v >> (i*8)) & 0xFFu);
         putchar(isprint(ch)?ch:'.');
     }
 }
-static void print_cell(u32 modes,u32 value, u16 cell_size){
-    int first=1;
-    if(modes & MODE_BIN){ if(!first) putchar(' '); print_binary(value); first=0;}
-    if(modes & MODE_HEX){ if(!first) putchar(' '); printf("0x%X", value); first=0;}
-    if(modes & MODE_OCT){ if(!first) putchar(' '); printf("0o%o", value); first=0;}
-    if(modes & MODE_DEC){ if(!first) putchar(' '); printf("%u", value); first=0;}
-    if(modes & MODE_CHR){ if(!first) putchar(' '); print_chars(value, cell_size); first=0;}
-}
+static void print_cell(uint32_t modes, uint32_t value, uint16_t cell_size){
+    int first = 1;
+    uint32_t shown = mask_by_size(value, cell_size);
 
+    if (modes & MODE_BIN){
+        if (!first) putchar(' ');
+        print_binary(shown);              // tu función actual
+        first = 0;
+    }
+    if (modes & MODE_HEX){
+        if (!first) putchar(' ');
+        print_hex_padded(shown, cell_size);
+        first = 0;
+    }
+    if (modes & MODE_OCT){
+        if (!first) putchar(' ');
+        printf("0o%o", (unsigned)shown);  // coherente con el tamaño
+        first = 0;
+    }
+    if (modes & MODE_DEC){
+        if (!first) putchar(' ');
+        print_dec_signed(shown, cell_size);
+        first = 0;
+    }
+    if (modes & MODE_CHR){
+        if (!first) putchar(' ');
+        print_chars(shown, cell_size);    // ya usa cell_size por byte
+        first = 0;
+    }
+}
 
 static int op_sys(VM* vm, const DecodedInst* di){
     uint32_t callno;

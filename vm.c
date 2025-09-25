@@ -85,7 +85,7 @@ int vm_run(VM* vm) {
     if(!translate_and_check(vm, seg, offset, 1, &phys)) break;
 
     DecodedInst di;
-    if(!fetch_and_decode(vm, &di)) break;
+    if(!fetch_and_decode(vm, &di)) return 1;  
     
     if (vm->disassemble) {
       disasm_print(vm, &di);

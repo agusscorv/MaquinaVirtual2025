@@ -6,7 +6,7 @@
 #include <stdint.h>
 #include <string.h>
 
-
+static inline uint8_t vmx_lo(uint8_t b){ return (uint8_t)(b & 0x0F); }
 const char* opcode_mnemonic(u8 op){
     static const char* T[256]={
         [0x00] = "SYS", 
@@ -40,94 +40,89 @@ const char* opcode_mnemonic(u8 op){
     return s ? s : "OP?";
 }
 
-static inline const char* vmx_regname(uint8_t code){
+static const char* vmx_regname(uint8_t code){
     switch (code){
-        case  1: return "DS";
-        case 10: return "EAX";
-        case 11: return "EBX";
-        case 12: return "ECX";
-        case 13: return "EDX";
-        case 14: return "CS";
-        case  0: return "LAR";
-        case  2: return "MBR";
-        case  3: return "IP";
-        case  4: return "OPC";
-        case  5: return "OP1";
-        case  6: return "OP2";
-        case  7: return "AC";
-        case  8: return "CC";
-        default:{
-            static char buf[8];
-            snprintf(buf, sizeof buf, "R%u", code);
-            return buf;
-        }
+        case 0x00: return "LAR";
+        case 0x01: return "MAR";
+        case 0x02: return "MBR";
+        case 0x03: return "IP";
+        case 0x04: return "OPC";
+        case 0x05: return "OP1";
+        case 0x06: return "OP2";
+        /* 0x07..0x09 reservados */
+        case 0x0A: return "EAX";
+        case 0x0B: return "EBX";
+        case 0x0C: return "ECX";
+        case 0x0D: return "EDX";
+        case 0x0E: return "EEX";
+        case 0x0F: return "EFX";
+        case 0x10: return "AC";
+        case 0x11: return "CC";
+        /* 0x12..0x19 reservados */
+        case 0x1A: return "CS";
+        case 0x1B: return "DS";
+        /* 0x1C..0x1F reservados */
+        default:   return "R?";
     }
 }
 
-void format_operand(const DecodedOp* op, char* out, size_t cap){
-  if (!op || !out || !cap) return;
 
-  switch (op->type) {
+void format_operand(const DecodedOp* op, char* out, size_t cap){
+    if (!op || !out || !cap) return;
+    out[0] = 0;
+
+    switch (op->type) {
     case OT_REG: {
-      uint8_t code = (uint8_t)(op->raw[0] & 0x0F);
-      snprintf(out, cap, "%s", vmx_regname(code)); 
-      return;
+        uint8_t code = (uint8_t)(op->raw[0]& 0x1F);  
+        snprintf(out, cap, "%s", vmx_regname(code));
+        return;
     }
     case OT_IMM: {
-      uint16_t v = be16(op->raw[0], op->raw[1]);  
-      snprintf(out, cap, "%u", (unsigned)v);
-      return;
+        uint16_t v = be16(op->raw[0], op->raw[1]);    // BE → decimal (sin signo)
+        snprintf(out, cap, "%u", (unsigned)v);
+        return;
     }
     case OT_MEM: {
-      uint8_t  b    = op->raw[0];
-      int16_t  disp = be16s(op->raw[1], op->raw[2]);
+        uint8_t  b    = op->raw[0]& 0x1F;
+        int16_t  disp = (int16_t)((op->raw[1]<<8) | op->raw[2]); // BE con signo
+        const char* base = vmx_regname(b);
 
-      if (b == 0x0F || b == 0xF0){
-        const char* rb = "DS";
-        if (disp == 0)           snprintf(out, cap, "[%s]", rb);
-        else if (disp < 0)       snprintf(out, cap, "[%s-%d]", rb, -(int)disp);
-        else                     snprintf(out, cap, "[%s+%d]", rb,  (int)disp);
+        if      (disp == 0) snprintf(out, cap, "[%s]", base);
+        else if (disp < 0)  snprintf(out, cap, "[%s-%d]", base, -(int)disp);
+        else                snprintf(out, cap, "[%s+%d]", base,  (int)disp);
         return;
-      }
-
-      uint8_t  code = (uint8_t)(b & 0x0F);
-      const char* rb = vmx_regname(code);
-      if (disp == 0)           snprintf(out, cap, "[%s]", rb);
-      else if (disp < 0)       snprintf(out, cap, "[%s-%d]", rb, -(int)disp);
-      else                     snprintf(out, cap, "[%s+%d]", rb,  (int)disp);
-       }
-      default: out[0]=0; return;
-     }
+    }
+    default:
+        return; // OT_NONE u otro: deja out=""
+    }
 }
 
 void disasm_print(VM* vm, const DecodedInst* di){
+    // Dirección física
     printf("[%04X] ", di->phys);
 
-    u8 buf[8];
-    u16 n= di->size;
-    if(n > sizeof(buf)) n = sizeof(buf);
+    // Bytes crudos (usa di->size ya calculado por el decoder)
+    uint8_t buf[8];
+    uint16_t n = di->size;
+    if (n > sizeof(buf)) n = sizeof(buf);
     code_read_bytes(vm, di->phys, buf, n);
-    for(u16 i=0; i<n; i++){
-        printf("%02X", buf[i]);
-        if(i+1 < n) putchar(' ');
+    for (uint16_t i = 0; i < n; ++i){
+        printf("%02X%s", buf[i], (i+1<n ? " " : ""));
     }
-    for(u16 i=n; i<5; i++){
-        printf(" ");
-    }
-    char A[64], B[64];
+    // separador
+    printf(" | ");
+
+    // Mnemónico y operandos
+    char A[64]={0}, B[64]={0};
     format_operand(&di->A, A, sizeof(A));
     format_operand(&di->B, B, sizeof(B));
 
     const char* m = opcode_mnemonic(di->opcode);
-    printf(" | %s", m);
-
-    int hasA = (di->A.type != OT_NONE);
-    int hasB = (di->B.type != OT_NONE);
-
-    if(hasA && hasB){
-        printf(" %s, %s", A, B);
-    }else if(hasA){
-        printf(" %s", A);
+    if (di->A.type != OT_NONE && di->B.type != OT_NONE) {
+        printf("%s %s, %s\n", m, A, B);
+    } else if (di->A.type != OT_NONE) {
+        printf("%s %s\n", m, A);
+    } else {
+        printf("%s\n", m);
     }
-    putchar('\n');  
 }
