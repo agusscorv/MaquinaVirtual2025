@@ -104,6 +104,44 @@ bool fetch_and_decode(VM* vm, DecodedInst* di){
     uint16_t new_off = (uint16_t)(off + di->size);
     vm->reg[IP] = ((uint32_t)seg << 16) | new_off;              
 
+        uint32_t descA = 0, descB = 0;
+
+    // --- Operando B ---
+    if (di->B.type == OT_REG) {
+        uint8_t reg_code = di->B.raw[0] & 0x1F;
+        descB = (0x01u << 24) | (uint32_t)reg_code;
+    }
+    else if (di->B.type == OT_IMM) {
+        uint16_t imm = be16(di->B.raw[0], di->B.raw[1]);
+        descB = (0x02u << 24) | (uint32_t)imm;
+    }
+    else if (di->B.type == OT_MEM) {
+        uint8_t base = di->B.raw[0] & 0x1F;
+        int16_t disp = (int16_t)((di->B.raw[1] << 8) | di->B.raw[2]);
+        descB = (0x03u << 24) | ((uint32_t)base << 16) | ((uint16_t)disp & 0xFFFFu);
+    }
+
+    // --- Operando A ---
+    if (di->A.type == OT_REG) {
+        uint8_t reg_code = di->A.raw[0] & 0x1F;
+        descA = (0x01u << 24) | (uint32_t)reg_code;
+    }
+    else if (di->A.type == OT_IMM) {
+        uint16_t imm = be16(di->A.raw[0], di->A.raw[1]);
+        descA = (0x02u << 24) | (uint32_t)imm;
+    }
+    else if (di->A.type == OT_MEM) {
+        uint8_t base = di->A.raw[0] & 0x1F;
+        int16_t disp = (int16_t)((di->A.raw[1] << 8) | di->A.raw[2]);
+        descA = (0x03u << 24) | ((uint32_t)base << 16) | ((uint16_t)disp & 0xFFFFu);
+    }
+
+    vm->reg[OP1] = descA;
+    vm->reg[OP2] = descB;
+
+    // Avanzar IP al final de la instrucción
+    vm->reg[IP] = ((uint32_t)seg << 16) | (uint32_t)(off + di->size);
+
     return true;
 }
 

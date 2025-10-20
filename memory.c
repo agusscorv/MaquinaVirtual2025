@@ -30,26 +30,44 @@ static bool read_bytes(VM* vm, u16 seg_idx, u16 offset, void* dst, u16 nbytes){
         return false;
     }
     set_lar_mar(vm, seg_idx, offset, nbytes, phys);
+
     memcpy(dst, &vm->ram[phys], nbytes);
 
-    u32 mbr=0;
-    memcpy(&mbr, &vm->ram[phys], nbytes);
-    vm->reg[MBR]=mbr;
+    // MBR debe reflejar el valor lógico (big-endian), no el endianness del host
+    u32 mbr = 0;
+    const u8* p = &vm->ram[phys];
+    switch (nbytes){
+        case 1: mbr = p[0]; break;
+        case 2: mbr = ((u32)p[0] << 8) |  (u32)p[1]; break;
+        case 4: mbr = ((u32)p[0] << 24) | ((u32)p[1] << 16) | ((u32)p[2] << 8) | (u32)p[3]; break;
+        default: return false;
+    }
+    vm->reg[MBR] = mbr;
     return true;
 }
+
 static bool write_bytes(VM* vm, u16 seg_idx, u16 offset, const void* src, u16 nbytes){
     u16 phys;
     if(!translate_and_check(vm, seg_idx, offset, nbytes, &phys)){
         return false;
     }
     set_lar_mar(vm, seg_idx, offset, nbytes, phys);
-    u32 mbr=0;
-    memcpy(&mbr, src, nbytes);
-    vm->reg[MBR]=mbr;
+
+    // MBR desde los bytes fuente interpretados como big-endian lógico
+    const u8* p = (const u8*)src;
+    u32 mbr = 0;
+    switch (nbytes){
+        case 1: mbr = p[0]; break;
+        case 2: mbr = ((u32)p[0] << 8) |  (u32)p[1]; break;
+        case 4: mbr = ((u32)p[0] << 24) | ((u32)p[1] << 16) | ((u32)p[2] << 8) | (u32)p[3]; break;
+        default: return false;
+    }
+    vm->reg[MBR] = mbr;
 
     memcpy(&vm->ram[phys], src, nbytes);
     return true;
 }
+
 bool mem_read_u8(VM* vm, u16 seg_idx, u16 offset, u32* out_value){
     u8 value=0;
     if(!read_bytes(vm, seg_idx, offset, &value, 1)){

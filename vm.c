@@ -77,26 +77,50 @@ int vm_run(VM* vm) {
   OpHandler table[256];
   init_dispatch_table(table);
 
-  while(1){
-    u16 seg=(u16)(vm->reg[IP] >> 16);
-    u16 offset=(u16)(vm->reg[IP] & 0xFFFFu);
+  for (;;) {
+    // 1) Fin normal solo por STOP
+    if (vm->reg[IP] == 0xFFFFFFFFu) {
+      return 0;
+    }
+
+    // 2) Preparar fetch de la instrucción en IP
+    u16 seg   = (u16)(vm->reg[IP] >> 16);
+    u16 off   = (u16)(vm->reg[IP] & 0xFFFFu);
+
+    // >>> NUEVO: fin de código = término normal (sin error)
+    // Si IP está EXACTAMENTE al final del segmento -> terminó el programa.
+    // (No confundir con "pasado" el final, que sí es error.)
+    if (off == vm->seg[seg].size) {
+      return 0; // sin errores
+    }
+    if (off > vm->seg[seg].size) {
+      fprintf(stderr, "Error: instruccion invalida\n");
+      return 1;
+    }
 
     u16 phys;
-    if(!translate_and_check(vm, seg, offset, 1, &phys)) break;
+    // Si no puedo ni leer el primer byte y no es fin exacto (ya chequeado arriba),
+    // entonces sí es instrucción inválida.
+    if (!translate_and_check(vm, seg, off, 1, &phys)) {
+      fprintf(stderr, "Error: instruccion invalida\n");
+      return 1;
+    }
 
     DecodedInst di;
-    if(!fetch_and_decode(vm, &di)) return 1;  
-    
+    if (!fetch_and_decode(vm, &di)) {
+      u32 opc = 0xFF;
+      (void)mem_read_u8(vm, seg, off, &opc);
+      fprintf(stderr, "Error: instruccion invalida OPC=%02X\n", (unsigned)opc);
+      return 1;
+    }
+
     if (vm->disassemble) {
       disasm_print(vm, &di);
     }
-    
-    int rc=exec_instruction(vm, &di, table);
-    if(rc!=0){
-      return 1;
-    } 
 
+    int rc = exec_instruction(vm, &di, table);
+    if (rc < 0) {
+      return 1; // algún op informó error
+    }
   }
-
-  return 0;
 }

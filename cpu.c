@@ -188,21 +188,31 @@ static int op_mul(VM* vm, const DecodedInst* di){
     return 0;
 }
 static int op_div(VM* vm, const DecodedInst* di){
-    u32 ua, ub;
+u32 ua, ub;
     if(!read_operand_u32(vm, &di->A, &ua)) return -1;
     if(!read_operand_u32(vm, &di->B, &ub)) return -1;
+
     if(ub == 0){
         fprintf(stderr, "Error: división por cero\n");
         return -1;
     }
+
     int32_t a = (int32_t)ua;
     int32_t b = (int32_t)ub;
-    int32_t q = a / b;
-    int32_t r = a % b;
+
+    int32_t q = a / b;     
+    int32_t r = a % b;    
+
+    if (r != 0) {
+        if ((r < 0 && b > 0) || (r > 0 && b < 0)) {
+            q -= 1;
+            r += b;
+        }
+    }
 
     if(!write_operand_u32(vm, &di->A, (u32)q)) return -1;
-    vm->reg[AC] = (u32)r;
-    set_NZ(vm, (u32)q);
+    vm->reg[AC] = (u32)r;          
+    set_NZ(vm, (u32)q);             
     return 0;
 }
 static int op_cmp(VM* vm, const DecodedInst* di){
@@ -423,12 +433,13 @@ static inline uint32_t mask_by_size(uint32_t v, uint16_t sz){
 
 static void print_hex_padded(uint32_t v, uint16_t cell_size){
     switch (cell_size){
-        case 1: printf("0x%02X",  (unsigned)(v & 0xFFu));    break;
-        case 2: printf("0x%04X",  (unsigned)(v & 0xFFFFu));  break;
-        case 4: printf("0x%08X",  (unsigned)v);              break;
-        default: printf("0x%X",   (unsigned)v);              break;
+        case 1: printf("0x%X",  (unsigned)(v & 0xFFu));    break;
+        case 2: printf("0x%X",  (unsigned)(v & 0xFFFFu));  break;
+        case 4: printf("0x%X",  (unsigned)v);              break;
+        default: printf("0x%X", (unsigned)v);              break;
     }
 }
+
 
 static void print_dec_signed(uint32_t v, uint16_t cell_size){
     switch (cell_size){
@@ -445,14 +456,9 @@ static void print_chars(u32 v, u16 size){
     }
 }
 static void print_cell(uint32_t modes, uint32_t value, uint16_t cell_size){
-    int first = 1;
     uint32_t shown = mask_by_size(value, cell_size);
+    int first = 1;
 
-    if (modes & MODE_BIN){
-        if (!first) putchar(' ');
-        print_binary(shown);              // tu función actual
-        first = 0;
-    }
     if (modes & MODE_HEX){
         if (!first) putchar(' ');
         print_hex_padded(shown, cell_size);
@@ -460,7 +466,12 @@ static void print_cell(uint32_t modes, uint32_t value, uint16_t cell_size){
     }
     if (modes & MODE_OCT){
         if (!first) putchar(' ');
-        printf("0o%o", (unsigned)shown);  // coherente con el tamaño
+        printf("0o%o", (unsigned)shown);
+        first = 0;
+    }
+    if (modes & MODE_CHR){
+        if (!first) putchar(' ');
+        print_chars(shown, cell_size);
         first = 0;
     }
     if (modes & MODE_DEC){
@@ -468,12 +479,12 @@ static void print_cell(uint32_t modes, uint32_t value, uint16_t cell_size){
         print_dec_signed(shown, cell_size);
         first = 0;
     }
-    if (modes & MODE_CHR){
+    if (modes & MODE_BIN){
         if (!first) putchar(' ');
-        print_chars(shown, cell_size);    // ya usa cell_size por byte
-        first = 0;
+        print_binary(shown);
     }
 }
+
 
 static int op_sys(VM* vm, const DecodedInst* di){
     uint32_t callno;
