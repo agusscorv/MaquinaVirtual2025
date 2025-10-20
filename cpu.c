@@ -44,16 +44,16 @@ static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
         default:   return REG_COUNT; // inválido
     }
 }
-static inline bool is_ds_implicit(uint8_t b){ return b==0x0F || b==0xF0; } // si tu vmt usa esto
+static inline bool is_ds_implicit(uint8_t b){ return b==0x0F || b==0xF0; } 
 
 static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg, u16* off){
     if(op->type != OT_MEM) return false;
     uint8_t base_byte = op->raw[0];
-    int16_t disp = (int16_t)((op->raw[1]<<8) | op->raw[2]);  // BE con signo
+    int16_t disp = (int16_t)((op->raw[1]<<8) | op->raw[2]);  
     uint8_t r = is_ds_implicit(base_byte) ? DS
                                           : vm_regidx_from_vmxcode(base_byte & 0x1F);
     if (r == REG_COUNT) return false;
-    u32 ptr = vm->reg[r];                 // seg:off empaquetado en 32 bits
+    u32 ptr = vm->reg[r];                
     *seg = (u16)(ptr >> 16);
     *off = (u16)((ptr & 0xFFFFu) + (u16)disp);
     return true;
@@ -70,7 +70,8 @@ bool read_operand_u32(VM* vm, const DecodedOp* op, uint32_t* out){
             return true;
         }
         case OT_IMM: {
-            *out = (u32)be16(op->raw[0], op->raw[1]);
+            int16_t s16 = (int16_t)be16(op->raw[0], op->raw[1]);
+            *out = (uint32_t)(int32_t)s16;
             return true;
         }
         case OT_MEM: {
