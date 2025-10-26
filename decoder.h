@@ -24,9 +24,7 @@ typedef struct{
     u16 size;
     u16 phys;
 } DecodedInst;
-static inline uint16_t be16(uint8_t hi, uint8_t lo){
-  return (uint16_t)(((uint16_t)hi << 8) | (uint16_t)lo);
-}
+
 
 
 static inline int16_t be16s(uint8_t hi, uint8_t lo){

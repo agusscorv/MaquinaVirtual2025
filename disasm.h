@@ -6,6 +6,8 @@
 const char* opcode_mnemonic(u8 opcode);
 const char* reg_name(u8 idx);
 
-void format_operand(const DecodedOp* op, char* out,size_t cap);
+void disasm_dump_segments(VM* vm);
+void disasm_dump_const_strings(VM* vm);
+void disasm_print(VM* vm, const DecodedInst* di);
 
 void disasm_print(VM* vm, const DecodedInst* di);
