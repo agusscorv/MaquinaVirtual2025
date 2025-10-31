@@ -3,8 +3,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-bool translate_and_check(VM* vm, u16 seg_idx, u16 offset, u16 nbytes, u16* out_phys);
-
 static inline uint32_t make_logical(u16 seg_idx, u16 offset) {
     return ((uint32_t)seg_idx << 16) | (uint32_t)offset;
 }
@@ -17,6 +15,9 @@ static inline uint16_t be16p(const uint8_t* p){
     return (uint16_t)(((uint16_t)p[0] << 8) | (uint16_t)p[1]);
 }
 
+bool translate_and_check_data (VM* vm, u16 seg_idx, u16 offset, u16 nbytes, u16* out_phys);
+bool translate_and_check_instr(VM* vm, u16 seg_idx, u16 offset, u16 nbytes, u16* out_phys);
+bool translate_and_check(VM* vm, u16 seg_idx, u16 offset, u16 nbytes, u16* out_phys);
 
 
 bool mem_read_u8(VM* vm, u16 seg_idx, u16 offset, u32* out_value);

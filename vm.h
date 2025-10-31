@@ -55,7 +55,6 @@ typedef struct {
     int  idx_extra;
     int  idx_stack;
 
-
     int  have_params;
     int  argc_on_stack;
 
@@ -71,3 +70,4 @@ int  vm_run(VM* vm);
 bool vm_save_vmi(VM* vm, const char* path);
 
 bool vm_load_vmi(VM* vm, const char* path);
+

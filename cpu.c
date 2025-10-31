@@ -12,11 +12,17 @@
 
 static inline uint16_t hi16_u32(uint32_t x){ return (uint16_t)(x >> 16); }
 static inline uint16_t lo16_u32(uint32_t x){ return (uint16_t)(x & 0xFFFFu); }
-static inline uint32_t shamt32(uint32_t v){ return v & 31u; } // 0..31
+static inline uint32_t shamt32(uint32_t v){ return v & 31u; }
 static inline uint32_t cc_Nbit(VM* vm){ return (vm->reg[CC] >> 31) & 1u; }
 static inline uint32_t cc_Zbit(VM* vm){ return (vm->reg[CC] >> 30) & 1u; }
-static inline uint16_t ecx_count(uint32_t ecx){ return (uint16_t)(ecx & 0xFFFFu); }
-static inline uint16_t ecx_size (uint32_t ecx){ return (uint16_t)(ecx >> 16); }  
+static inline uint16_t ecx_size(uint32_t ecx) {return (uint16_t)(ecx >> 16);}
+static inline uint16_t ecx_count(uint32_t ecx) {
+    uint16_t ch = (uint16_t)((ecx >> 8) & 0xFFu);
+    if (ch != 0) {
+        return ch;
+    }
+    return (uint16_t)(ecx & 0xFFFFu);
+}
 enum { MODE_DEC=0x01, MODE_CHR=0x02, MODE_OCT=0x04, MODE_HEX=0x08, MODE_BIN=0x10 };
 static inline void jump_to_code(VM* vm, uint16_t off){
   uint16_t code_seg = hi16_u32(vm->reg[CS]);               
@@ -24,7 +30,7 @@ static inline void jump_to_code(VM* vm, uint16_t off){
 }
 static inline uint8_t mem_size_code(const DecodedOp* op){ return (uint8_t)(op->raw[0] >> 6); }
 static inline uint16_t mem_size_from_code(uint8_t c){
-    switch (c & 0x3){ case 0: return 4; case 1: return 2; case 2: return 1; default: return 4; }
+    switch (c & 0x3){ case 0: return 4; case 2: return 2; case 3: return 1; default: return 4; }
 }
 enum { REG_SECT_32=0, REG_SECT_16=1, REG_SECT_8H=2, REG_SECT_8L=3 };
 static inline uint8_t reg_sector(const DecodedOp* op){ return (uint8_t)((op->raw[0] >> 5) & 0x3); }
@@ -38,30 +44,42 @@ static inline void term_clear(void){
 
 static int single_step(VM* vm){
     if (vm->reg[IP] == 0xFFFFFFFFu) return 0;
+
     uint16_t seg = (uint16_t)(vm->reg[IP] >> 16);
     uint16_t off = (uint16_t)(vm->reg[IP] & 0xFFFFu);
 
     if (off == vm->seg[seg].size) return 0;
-    if (off >  vm->seg[seg].size){ fprintf(stderr,"Error: instruccion invalida\n"); return -1; }
+
+    if (off > vm->seg[seg].size){
+        fprintf(stderr,"Error: fallo de segmento\n");
+        return -1;
+    }
 
     uint16_t phys;
-    if (!translate_and_check(vm, seg, off, 1, &phys)){
-        fprintf(stderr,"Error: instruccion invalida\n"); return -1;
+    if (!translate_and_check_instr(vm, seg, off, 1, &phys)){
+        fprintf(stderr,"Error: instruccion invalida\n");
+        return -1;
     }
 
     DecodedInst di;
     if (!fetch_and_decode(vm, &di)){
-        uint32_t opc=0xFF; (void)mem_read_u8(vm, seg, off, &opc);
+        uint32_t opc=0xFF;
+        (void)mem_read_u8(vm, seg, off, &opc);
         fprintf(stderr,"Error: instruccion invalida OPC=%02X\n", (unsigned)opc);
         return -1;
     }
 
-    if (vm->disassemble) disasm_print(vm, &di);
+    if (vm->disassemble){
+        disasm_print(vm, &di);
+    }
 
-    OpHandler tb[256]; init_dispatch_table(tb);
+    OpHandler tb[256];
+    init_dispatch_table(tb);
     int rc = exec_instruction(vm, &di, tb);
     return (rc<0)? -1 : 0;
 }
+
+
 static inline uint16_t ss_index(VM* vm){
     return (vm->reg[SS] == 0xFFFFFFFFu) ? 0xFFFFu : hi16_u32(vm->reg[SS]);
 }
@@ -86,14 +104,20 @@ static int stack_push32(VM* vm, uint32_t val){
     return 0;
 }
 static int stack_pop32(VM* vm, uint32_t* out){
-    if (vm->reg[SS] == 0xFFFFFFFFu || vm->reg[SP] == 0xFFFFFFFFu){
-        fprintf(stderr, "Error: stack underflow (SS/SP inválidos)\n");
-        return -1;
-    }
     uint16_t seg = ss_index(vm);
     uint16_t sp  = sp_off(vm);
+
+    if (vm->seg[seg].size == 0 || sp + 4 > vm->seg[seg].size) {
+        fprintf(stderr, "Error: stack underflow (pila vacia o bytes insuficientes)\n"); 
+        return -1; 
+    }
+
     uint32_t v = 0;
-    if (!mem_read_u32(vm, seg, sp, &v)) { fprintf(stderr,"Error: stack underflow\n"); return -1; }
+    if (!mem_read_u32(vm, seg, sp, &v)) { 
+         fprintf(stderr,"Error: stack underflow\n");
+         return -1; 
+    }
+
     sp += 4;
     set_sp_off(vm, sp);
     *out = v;
@@ -108,19 +132,31 @@ static inline uint8_t vm_regidx_from_vmxcode(uint8_t code){
         case 0x04: return OPC;
         case 0x05: return OP1;
         case 0x06: return OP2;
+
+        case 0x07: return SP;  
+        case 0x08: return BP;  
+
         case 0x0A: return EAX;
         case 0x0B: return EBX;
         case 0x0C: return ECX;
         case 0x0D: return EDX;
         case 0x0E: return EEX;
         case 0x0F: return EFX;
+
         case 0x10: return AC;
         case 0x11: return CC;
+
         case 0x1A: return CS;
         case 0x1B: return DS;
-        default:   return REG_COUNT; // inválido
+        case 0x1C: return ES;   
+        case 0x1D: return SS;   
+        case 0x1E: return KS;   
+        case 0x1F: return PS;  
+
+        default:   return REG_COUNT;
     }
 }
+
 static inline bool is_ds_implicit(uint8_t b){ return b==0x0F || b==0xF0; } 
 static bool get_mem_address(VM* vm, const DecodedOp* op, u16* seg, u16* off){
     if(op->type != OT_MEM) return false;
@@ -202,10 +238,11 @@ bool write_operand_u32(VM* vm, const DecodedOp* op, uint32_t val){
     }
 }
 static bool phys_of_cell(VM* vm, u32 base_ptr, u16 cell_size, u16 idx, u16* out_phys){
-    u16 seg=hi16_u32(base_ptr);
-    u16 off=(u16)(lo16_u32(base_ptr) + (idx * cell_size));
-    return translate_and_check(vm, seg, off, cell_size, out_phys);
+    u16 seg = hi16_u32(base_ptr);
+    u16 off = (u16)(lo16_u32(base_ptr) + (idx * cell_size));
+    return translate_and_check_data(vm, seg, off, cell_size, out_phys);
 }
+
 static bool mem_read_cell(VM* vm, u16 seg, u16 offset, u16 n, u32* out){
      switch(n){
         case 1: return mem_read_u8(vm, seg, offset, out);
@@ -463,10 +500,16 @@ static int op_rnd(VM* vm, const DecodedInst* di){
     return 0;
 }
 static int op_push(VM* vm, const DecodedInst* di){
-    uint32_t v=0;
-    if (!read_operand_u32(vm, &di->A, &v)) return -1;  
-    return stack_push32(vm, v);
+    uint32_t v = 0;
+    if (!read_operand_u32(vm, &di->A, &v)) {
+        v = 0;
+    }
+    if (stack_push32(vm, v) < 0) {
+        return -1;
+    }
+    return 0;
 }
+
 static int op_pop(VM* vm, const DecodedInst* di){
     uint32_t v=0;
     if (di->A.type==OT_NONE || di->A.type==OT_IMM) return -1;
@@ -488,9 +531,10 @@ static int op_ret(VM* vm, const DecodedInst* di){
     return 0;
 }
 static bool read_line(char* buf, size_t cap){
-    if (!fgets(buf, (int)cap, stdin))  
+    if (!fgets(buf, (int)cap, stdin)) {
+        clearerr(stdin);
         return false;
-
+    }
     size_t n = strlen(buf);
     while (n && (buf[n-1]=='\n' || buf[n-1]=='\r')) {
         buf[--n] = 0;
@@ -499,8 +543,10 @@ static bool read_line(char* buf, size_t cap){
 }
 static bool parse_input(u32 mode, u16 cell_size, u32* out){
     char buf[256];
-    if (!read_line(buf, sizeof buf))   
+    if (!read_line(buf, sizeof buf)) {
+        fprintf(stderr, "Error: Falla al leer input de SYS 1. Abortando.\n");
         return false;
+    }
 
     if (mode & MODE_CHR){
         u32 v = 0;
@@ -598,8 +644,12 @@ static void print_cell(uint32_t modes, uint32_t value, uint16_t cell_size){
 }
 
 static int op_sys(VM* vm, const DecodedInst* di){
-    uint32_t callno;
-    if (!read_operand_u32(vm, &di->A, &callno)) return -1;
+    uint32_t callno = 0xFFFFFFFFu;
+    read_operand_u32(vm, &di->A, &callno);
+
+    if (!read_operand_u32(vm, &di->A, &callno)) {
+        callno = (vm->reg[EAX] & 0xFFFFu);
+    }
 
     uint32_t eax = vm->reg[EAX];
     uint32_t ecx = vm->reg[ECX];
@@ -608,21 +658,30 @@ static int op_sys(VM* vm, const DecodedInst* di){
     uint16_t count = ecx_count(ecx);  
     uint16_t size  = ecx_size(ecx);   
 
-    if (callno == 1u){
-        uint32_t modes = eax & 0x1Fu;
-        for (uint16_t i=0; i<count; ++i){
-            uint16_t phys;
-            if (!phys_of_cell(vm, edx, size, i, &phys)) return -1;
-            printf("[%04X]: ", phys); fflush(stdout);
+    if (callno == 1u) {
+     uint32_t modes = eax & 0x1Fu;
 
-            uint32_t val = 0;
-            if (!parse_input(modes, size, &val)) return -1;
+     if (count == 0) {count = 1;}
+     if (size == 0) { size = 4;}
 
-            uint16_t seg = (uint16_t)(edx >> 16);
-            uint16_t off = (uint16_t)((edx & 0xFFFFu) + i*size);
-            if (!mem_write_cell(vm, seg, off, size, val)) return -1;
-        }
-        return 0;
+     for (uint16_t i = 0; i < count; ++i) {
+        uint16_t phys;
+        if (!phys_of_cell(vm, edx, size, i, &phys))
+            return -1;
+
+        printf("[%04X]: ", phys);
+        fflush(stdout);
+
+        uint32_t val = 0;
+        if (!parse_input(modes, size, &val))
+            return -1;
+
+        uint16_t seg = (uint16_t)(edx >> 16);
+        uint16_t off = (uint16_t)((edx & 0xFFFFu) + i * size);
+        if (!mem_write_cell(vm, seg, off, size, val))
+            return -1;
+     }
+     return 0;
     }
 
     if (callno == 2u){
@@ -703,11 +762,8 @@ static int op_sys(VM* vm, const DecodedInst* di){
             }
         }
     }
-
     return -1;
 }
-
-
 
 void init_dispatch_table(OpHandler tb[256]){
     for(int i=0; i<256; i++) tb[i]=op_invalid;

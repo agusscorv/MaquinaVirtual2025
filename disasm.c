@@ -9,25 +9,30 @@
 static inline int is_ds_implicit_u8(uint8_t b){ return (b==0x0F || b==0xF0); }
 static const char* vmx_regname(uint8_t code){
     switch (code){
-        case 0x00: return "LAR";  case 0x01: return "MAR";  case 0x02: return "MBR";
-        case 0x03: return "IP";   case 0x04: return "OPC";  case 0x05: return "OP1";
-        case 0x06: return "OP2";  case 0x0A: return "EAX";  case 0x0B: return "EBX";
-        case 0x0C: return "ECX";  case 0x0D: return "EDX";  case 0x0E: return "EEX";
-        case 0x0F: return "EFX";  case 0x10: return "AC";   case 0x11: return "CC";
-        case 0x1A: return "CS";   case 0x1B: return "DS";   case 0x1C: return "ES";
-        case 0x1D: return "SS";   case 0x1E: return "KS";   case 0x1F: return "PS";
+        case 0x00: return "LAR";  
+        case 0x01: return "MAR";  
+        case 0x02: return "MBR";
+        case 0x03: return "IP";   
+        case 0x04: return "OPC";  
+        case 0x05: return "OP1";
+        case 0x06: return "OP2"; 
+        case 0x07: return "SP";  
+        case 0x08: return "BP"; 
+        case 0x0A: return "EAX";  
+        case 0x0B: return "EBX";
+        case 0x0C: return "ECX";  
+        case 0x0D: return "EDX";  
+        case 0x0E: return "EEX";
+        case 0x0F: return "EFX";  
+        case 0x10: return "AC";   
+        case 0x11: return "CC";
+        case 0x1A: return "CS";   
+        case 0x1B: return "DS";   
+        case 0x1C: return "ES";
+        case 0x1D: return "SS";   
+        case 0x1E: return "KS";   
+        case 0x1F: return "PS";
         default: return "R?";
-    }
-}
-static const char* seg_name_from_index(int idx){
-    switch (idx){
-        case SEG_PARAM: return "PARAM";
-        case SEG_CONST: return "CONST";
-        case SEG_CODE:  return "CODE";
-        case SEG_DATA:  return "DATA";
-        case SEG_EXTRA: return "EXTRA";
-        case SEG_STACK: return "STACK";
-        default:        return "SEG?";
     }
 }
 
@@ -61,11 +66,20 @@ void disasm_dump_segments(VM* vm){
            (unsigned)ip_off);
 }
 
-
-static void print_string_preview_text(const u8* p, u16 max){
-    putchar('"');
+static void print_string_preview_bytes(const u8* p, u16 length){
+    u16 max = (length > 16) ? 16 : length;
     for (u16 i = 0; i < max; i++){
-        unsigned char ch = p[i];
+        u8 ch = p[i];
+        if (ch == 0) break;
+        printf("%02X ", (unsigned)ch);
+    }
+}
+
+
+static void print_string_preview_text(const u8* p, u16 length){
+    putchar('"');
+    for (u16 i = 0; i < length; i++){
+        u8 ch = p[i];
         if (ch == 0) break;
         putchar((ch >= 32 && ch < 127) ? ch : '.');
     }
@@ -73,31 +87,38 @@ static void print_string_preview_text(const u8* p, u16 max){
 }
 
 void disasm_dump_const_strings(VM* vm){
-    u16 base = vm->seg[SEG_CONST].base;
-    u16 size = vm->seg[SEG_CONST].size;
-    if (size == 0){
-        return; 
+    if (vm->idx_const < 0) {
+        return;
     }
 
+    u16 base = vm->seg[vm->idx_const].base;
+    u16 size = vm->seg[vm->idx_const].size;
+    if (size == 0) return;
+
     puts("CONST STRINGS:");
+
     u16 off = 0;
     while (off < size){
         while (off < size && vm->ram[base + off] == 0){
             off++;
         }
         if (off >= size) break;
+
         u16 start = off;
         while (off < size && vm->ram[base + off] != 0){
             off++;
         }
         u16 length = (u16)(off - start);
+
         printf(" [%04X] ", (unsigned)(base + start));
-        print_string_preview_bytes(&vm->ram[base + start], length, (u16)(base + start));
-        printf(" | ");
+        print_string_preview_bytes(&vm->ram[base + start], length);
+        printf("| ");
         print_string_preview_text(&vm->ram[base + start], length);
         putchar('\n');
 
-        if (off < size && vm->ram[base + off] == 0) off++;
+        if (off < size && vm->ram[base + off] == 0){
+            off++;
+        }
     }
 
     putchar('\n');
@@ -116,17 +137,42 @@ static const char* reg_aliased_name(uint8_t reg_code, uint8_t sector){
 }
 const char* opcode_mnemonic(u8 op){
     static const char* T[256]={
-        [0x00]="SYS",[0x01]="JMP",[0x02]="JZ",[0x03]="JP",
-        [0x04]="JN",[0x05]="JNZ",[0x06]="JNP",[0x07]="JNN",
-        [0x08]="NOT",[0x0F]="STOP",
-        [0x10]="MOV",[0x11]="ADD",[0x12]="SUB",[0x13]="MUL",
-        [0x14]="DIV",[0x15]="CMP",[0x16]="SHL",[0x17]="SHR",
-        [0x18]="SAR",[0x19]="AND",[0x1A]="OR",[0x1B]="XOR",
-        [0x1C]="SWAP",[0x1D]="LDL",[0x1E]="LDH",[0x1F]="RND",
-    };
-    const char* s = T[op]; return s ? s : "OP?";
-}
+        [0x00]="SYS",
+        [0x01]="JMP",
+        [0x02]="JZ",
+        [0x03]="JP",
+        [0x04]="JN",
+        [0x05]="JNZ",
+        [0x06]="JNP",
+        [0x07]="JNN",
+        [0x08]="NOT",
 
+        [0x0B]="PUSH",
+        [0x0C]="POP",
+        [0x0D]="CALL",
+        [0x0E]="RET",
+        [0x0F]="STOP",
+
+        [0x10]="MOV",
+        [0x11]="ADD",
+        [0x12]="SUB",
+        [0x13]="MUL",
+        [0x14]="DIV",
+        [0x15]="CMP",
+        [0x16]="SHL",
+        [0x17]="SHR",
+        [0x18]="SAR",
+        [0x19]="AND",
+        [0x1A]="OR",
+        [0x1B]="XOR",
+        [0x1C]="SWAP",
+        [0x1D]="LDL",
+        [0x1E]="LDH",
+        [0x1F]="RND",
+    };
+    const char* s = T[op];
+    return s ? s : "OP?";
+}
 
 static inline uint8_t reg_sector_from_raw0(uint8_t r0){ return (uint8_t)((r0>>5)&0x3); }
 static inline uint8_t mem_size_from_raw0(uint8_t r0){
@@ -159,23 +205,23 @@ static void format_operand(const DecodedOp* op, uint8_t size_hint, char* out, si
     }
 
     case OT_IMM: {
-        uint16_t v = be16_pair(op->raw[0], op->raw[1]);
-        snprintf(out, cap, "%u", (unsigned)v);
+        int16_t sval = (int16_t)be16_pair(op->raw[0], op->raw[1]);
+        snprintf(out, cap, "%d", (int)sval);
         return;
     }
 
     case OT_MEM: {
-        uint8_t  r0   = op->raw[0];
-        int16_t  disp = (int16_t)((op->raw[1] << 8) | op->raw[2]);
-        uint8_t  sz   = mem_size_from_raw0(r0);
-        char     p    = (sz==1)?'b':(sz==2)?'w':'l';
+        uint8_t r0 = op->raw[0];
+        int16_t disp = (int16_t)((op->raw[1] << 8) | op->raw[2]);
+        uint8_t sz = mem_size_from_raw0(r0);
+        char p = (sz==1)?'b':(sz==2)?'w':'l';
 
-        const char* base =
-            (r0==0x0F || r0==0xF0) ? "DS" : vmx_regname((uint8_t)(r0 & 0x1F));
+        const char* base = is_ds_implicit_u8(r0) ? "DS" : vmx_regname((uint8_t)(r0 & 0x1F));
 
-        if      (disp == 0) snprintf(out, cap, "%c[%s]",    p, base);
+
+        if (disp == 0) snprintf(out, cap, "%c[%s]",    p, base);
         else if (disp < 0)  snprintf(out, cap, "%c[%s-%d]", p, base, -(int)disp);
-        else                snprintf(out, cap, "%c[%s+%d]", p, base,  (int)disp);
+        else snprintf(out, cap, "%c[%s+%d]", p, base,  (int)disp);
         return;
     }
 
